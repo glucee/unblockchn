@@ -290,9 +290,9 @@ Unblock CHN 路由器命令：
         unblock_youku = UnblockYouku()
         cls.create_conf_files(unblock_youku.black_domains)
 
-        # 复制 ipset 和 dnsmasq 规则配置文件到 jffs 配置目录
+        # 复制 ipset 规则配置文件到 jffs 配置目录
         cls.cp_ipset_conf_to_jffs()
-        cls.cp_dnsmasq_conf_to_jffs()
+        # cls.cp_dnsmasq_conf_to_jffs()
 
         # 清空 chn 和其它自定义的 ipset 表
         cls.flush_ipset()
@@ -304,7 +304,7 @@ Unblock CHN 路由器命令：
         elogger.info(f"✔ 载入 ipset 规则：{cmd}")
 
         # 重启 dnsmasq
-        cls.restart_dnsmasq()
+        # cls.restart_dnsmasq()
 
         ologger.info("更新成功")
 
@@ -327,9 +327,9 @@ Unblock CHN 一键配置路由器
         unblock_youku = UnblockYouku()
         cls.create_conf_files(unblock_youku.black_domains)
 
-        # 复制 ipset 和 dnsmasq 规则配置文件到 jffs 配置目录
+        # 复制 ipset 规则配置文件到 jffs 配置目录
         cls.cp_ipset_conf_to_jffs()
-        cls.cp_dnsmasq_conf_to_jffs()
+        # cls.cp_dnsmasq_conf_to_jffs()
 
         # 配置 ipset 和 iptables
         cls.setup_ipset_iptables()
@@ -338,7 +338,7 @@ Unblock CHN 一键配置路由器
         cls.set_nvram('unblockchn_on', "True")
 
         # 重启 dnsmasq
-        cls.restart_dnsmasq()
+        # cls.restart_dnsmasq()
 
         # 添加每日更新规则的 cron 定时任务
         cls.add_renew_cron_job()
@@ -385,15 +385,15 @@ Unblock CHN 还原路由器为未配置状态
                 cls.remove_from_script(NAT_START_SCRIPT_PATH, comment)
                 elogger.info(f"✔ 从启动脚本里移除 ipset 载入命令：{NAT_START_SCRIPT_PATH}")
 
-        # 若 dnsmasq 模板内有其它内容则生成对应配置文件并复制到 jffs
-        # 否则就删除 jffs 中的配置文件
-        dnsmasq_has_conf = cls.create_dnsmasq_conf_file(dnsmasq_rules=None)
-        if dnsmasq_has_conf:
-            cls.cp_dnsmasq_conf_to_jffs()
-        else:
-            if os.path.isfile(DNSMASQ_CONF_JFFS_PATH):
-                os.remove(DNSMASQ_CONF_JFFS_PATH)
-                elogger.info(f"✔ 删除：{DNSMASQ_CONF_JFFS_PATH}")
+        # # 若 dnsmasq 模板内有其它内容则生成对应配置文件并复制到 jffs
+        # # 否则就删除 jffs 中的配置文件
+        # dnsmasq_has_conf = cls.create_dnsmasq_conf_file(dnsmasq_rules=None)
+        # if dnsmasq_has_conf:
+        #     cls.cp_dnsmasq_conf_to_jffs()
+        # else:
+        #     if os.path.isfile(DNSMASQ_CONF_JFFS_PATH):
+        #         os.remove(DNSMASQ_CONF_JFFS_PATH)
+        #         elogger.info(f"✔ 删除：{DNSMASQ_CONF_JFFS_PATH}")
 
         # 删除 iptables 规则
         iptables_chn_exists = cls.check_iptables_chn()
@@ -427,14 +427,14 @@ Unblock CHN 还原路由器为未配置状态
         # 删除 nvram 中 unblockchn_on 变量
         cls.remove_nvram('unblockchn_on')
 
-        # 重启 dnsmasq
-        cls.restart_dnsmasq()
+        # # 重启 dnsmasq
+        # cls.restart_dnsmasq()
 
         ologger.info("还原成功")
 
     @classmethod
     def cmd_create(cls):
-        """仅生成 ipset 和 dnsmasq 规则配置文件"""
+        """仅生成 ipset 规则配置文件"""
 
         # 生成路由器配置文件
         unblock_youku = UnblockYouku()
@@ -594,14 +594,20 @@ Unblock CHN 还原路由器为未配置状态
                     rule = f"add chn {domain}"
                     ipset_rules.append(rule)
                 else:  # 域名
-                    rule = f"ipset=/{domain}/chn"
-                    dnsmasq_rules.append(rule)
+                    try:
+                        ip = socket.gethostbyname(domain)
+                        if ip not in ["127.0.0.1", "0.0.0.1"]:
+                            rule = f"add chn {ip}"
+                            if rule not in ipset_rules:
+                                ipset_rules.append(rule)
+                    except:
+                        pass
 
         # 从模板生成 ipset 规则配置文件 ipset.rules
         cls.create_ipset_conf_file(ipset_rules)
 
-        # 从模板生成 dnsmasq 规则配置文件 dnsmasq.conf.add
-        cls.create_dnsmasq_conf_file(dnsmasq_rules)
+        # # 从模板生成 dnsmasq 规则配置文件 dnsmasq.conf.add
+        # cls.create_dnsmasq_conf_file(dnsmasq_rules)
 
     @classmethod
     def create_ipset_conf_file(cls, ipset_rules):
