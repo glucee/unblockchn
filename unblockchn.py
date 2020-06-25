@@ -598,10 +598,10 @@ Unblock CHN 还原路由器为未配置状态
                         ip = socket.gethostbyname(domain)
                         if ip not in ["127.0.0.1", "0.0.0.1"]:
                             rule = f"add chn {ip}"
-                            if rule not in ipset_rules:
-                                ipset_rules.append(rule)
+                            ipset_rules.append(rule)
                     except:
                         pass
+        ipset_rules = list(dict.fromkeys(ipset_rules)) #remove the same IPs
 
         # 从模板生成 ipset 规则配置文件 ipset.rules
         cls.create_ipset_conf_file(ipset_rules)
