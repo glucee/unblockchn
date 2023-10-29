@@ -67,11 +67,12 @@ Unblock CHN 路由器命令：
   setup [--no-ss]           一键配置路由器 [--no-ss: 跳过配置 ss-redir]
   restore [--no-ss]         还原路由器为未配置状态 [--no-ss: 跳过还原 ss-redir]
   create                    仅生成 ipset 和 dnsmasq 规则配置文件
+  add <URL/IP/域名>         添加 dnsmasq 规则到配置文件 [--ads:此<URL/IP/域名>为广告] [--comment <COMMENT>]
 """
         parser = argparse.ArgumentParser(usage=cls.execute.__doc__)
         parser.add_argument(
             'cmd',
-            choices=['status', 'on', 'off', 'servers', 'switch', 'check', 'renew', 'setup', 'restore', 'create']
+            choices=['status', 'on', 'off', 'servers', 'switch', 'check', 'renew', 'setup', 'restore', 'create', 'add']
         )
         args = parser.parse_args(raw_args[0:1])
 
@@ -100,6 +101,8 @@ Unblock CHN 路由器命令：
             cls.cmd_setup(raw_args[1:])
         elif args.cmd == 'restore':
             cls.cmd_restore(raw_args[1:])
+        elif args.cmd == 'add':
+            cls.cmd_add_dnsmasq(raw_args[1:])
 
     @classmethod
     def cmd_status(cls):
@@ -279,7 +282,13 @@ Unblock CHN 路由器命令：
         if returncode == 0:
             ologger.info(f"{ip} 走代理")
         else:
-            ologger.info(f"{ip} 不走代理")
+            cmd = f"ipset test ads {ip}"
+            returncode = subprocess.call(
+                cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if returncode == 0:
+                ologger.info(f"{ip} 被屏蔽")
+            else:
+                ologger.info(f"{ip} 不走代理")
 
     @classmethod
     def cmd_renew(cls):
@@ -347,7 +356,7 @@ Unblock CHN 一键配置路由器
 
     @classmethod
     def cmd_restore(cls, raw_args):
-        """python3 unblockchn.py router setup [-h] [--no-ss]
+        """python3 unblockchn.py router restore [--no-ss]
 
 Unblock CHN 还原路由器为未配置状态
 """
@@ -568,7 +577,6 @@ Unblock CHN 还原路由器为未配置状态
         comment = "# Load ipset rules"
         cls.append_to_script(NAT_START_SCRIPT_PATH, comment, ipset_cmd)
         elogger.info(f"✔ 保存 ipset 载入命令到路由器的 nat-start 启动脚本中：{NAT_START_SCRIPT_PATH}")
-
         # 添加 iptables 规则
         iptables_chn_exists = cls.check_iptables_chn()
         if not iptables_chn_exists:
@@ -578,6 +586,8 @@ Unblock CHN 还原路由器为未配置状态
         # 保存 iptables 添加规则命令到路由器的 nat-start 启动脚本中
         comment = "# Redirect chn ipset to ss-redir"
         cmd = f'if [ "$(nvram get unblockchn_on)" = "True" ]; then {ADD_IPTABLES_CHN_CMD}; fi'
+        cls.append_to_script(NAT_START_SCRIPT_PATH, comment, cmd)
+        cmd = f'if [ "$(nvram get unblockchn_on)" = "True" ]; then {ADD_IPTABLES_ADS_CMD}; fi'
         cls.append_to_script(NAT_START_SCRIPT_PATH, comment, cmd)
         elogger.info(f"✔ 保存 iptables 规则添加命令到路由器的 nat-start 启动脚本中：{NAT_START_SCRIPT_PATH}")
 
@@ -594,6 +604,8 @@ Unblock CHN 还原路由器为未配置状态
                     rule = f"add chn {domain}"
                     ipset_rules.append(rule)
                 else:  # 域名
+                    if domain.startswith("*."):  # DOMAIN-SUFFIX
+                        domain = domain.replace("*.", ".", 1)
                     rule = f"ipset=/{domain}/chn"
                     dnsmasq_rules.append(rule)
 
@@ -697,11 +709,13 @@ Unblock CHN 还原路由器为未配置状态
     def add_iptables_chn(cls):
         """iptables 添加 chn ipset 规则"""
         subprocess.check_call(ADD_IPTABLES_CHN_CMD, shell=True)
+        subprocess.check_call(ADD_IPTABLES_ADS_CMD, shell=True)
 
     @classmethod
     def delete_iptables_chn(cls):
         """iptables 删除 chn ipset 规则"""
         subprocess.check_call(DELETE_IPTABLES_CHN_CMD, shell=True)
+        subprocess.check_call(DELETE_IPTABLES_ADS_CMD, shell=True)
 
     @classmethod
     def check_iptables_chn(cls):
@@ -741,6 +755,26 @@ Unblock CHN 还原路由器为未配置状态
         comment = "# unblockchn_renew cron job"
         cls.remove_from_script(SERVICES_START_SCRIPT_PATH, comment)
         elogger.info(f"✔ 从启动脚本里移除定时命令：{SERVICES_START_SCRIPT_PATH}")
+
+    @classmethod
+    def cmd_add_dnsmasq(cls, raw_args):
+        parser = argparse.ArgumentParser(usage=cls.cmd_add_dnsmasq.__doc__)
+        parser.add_argument('domain', help="dnsmasq 规则")
+
+        parser.add_argument('--ads', action='store_true', help="指定ads ipset")
+        parser.add_argument('--comment', nargs='?', help="dnsamsq 规则comment")
+        args = parser.parse_args(raw_args)
+        script_path = os.path.join(CONFIGS_DIR_PATH, "dnsmasq.conf.add.tpl")
+        if os.path.isfile(script_path):
+            with open(script_path, 'r', encoding='utf-8') as f:
+                scpt = f.read()
+        else:
+            scpt = "\{rules\}\n"
+        ipset = "ads" if args.ads else "chn"
+        scpt = "#" + args.comment + "\nipset=/" + args.domain + "/" + ipset + "\n" + scpt
+        with open(script_path, 'w', encoding='utf-8') as f:
+            f.write(scpt)
+        cls.cmd_renew()
 
     @classmethod
     def append_to_script(cls, script_path, comment, cmd):
@@ -1021,7 +1055,7 @@ Unblock CHN
         white_urls = cls.urls_to_rules(white_urls)
         rules = {
             'black': black_rules,
-            'white': white_urls
+            'white': []
         }
         return rules
 
@@ -1142,12 +1176,14 @@ class UnblockYouku(object):
         if self._black_urls is not None:
             return self._black_urls
 
-        header_urls = self.extract('header_urls')
-        redirect_urls = self.extract('redirect_urls')
-        chrome_proxy_urls = self.extract('chrome_proxy_urls')
-        pac_proxy_urls = self.extract('pac_proxy_urls')
+        header_urls = self.extract('HEADER_URLS')
+        # redirect url is deprecated: https://github.com/uku/Unblock-Youku/commit/877652386963132680e55ec23deb22d4f89554f4
+        # redirect_urls = self.extract('redirect_urls')
+        chrome_proxy_urls = self.extract('PROXY_URLS')
+        # pac_proxy is removed: https://github.com/uku/Unblock-Youku/commit/62fb6e4450afb3937679de7af863a5c380b50edb
+        # pac_proxy_urls = self.extract('pac_proxy_urls')
 
-        self._black_urls = header_urls + redirect_urls + chrome_proxy_urls + pac_proxy_urls
+        self._black_urls = header_urls + chrome_proxy_urls
         self._black_urls = list(set(self._black_urls))
         self._black_urls.sort()
 
@@ -1159,10 +1195,11 @@ class UnblockYouku(object):
         if self._white_urls is not None:
             return self._white_urls
 
-        chrome_proxy_bypass_urls = self.extract('chrome_proxy_bypass_urls')
-        pac_proxy_bypass_urls = self.extract('pac_proxy_bypass_urls')
+        proxy_bypass_urls = self.extract('PROXY_BYPASS_URLS')
+        # pac_proxy_bypass_urls = self.extract('pac_proxy_bypass_urls')
 
-        self._white_urls = chrome_proxy_bypass_urls + pac_proxy_bypass_urls
+        self._white_urls = []
+        self._white_urls = proxy_bypass_urls
         self._white_urls = list(set(self._white_urls))
         self._white_urls.sort()
 
@@ -1201,8 +1238,8 @@ class UnblockYouku(object):
         return self._white_domains
 
     def extract(self, name):
-        """从 Unblock Youku 的 urls.js 中提取指定的 URL 列表"""
-        pattern = f"unblock_youku\\.{name}\\s*=.+?(\\[.+?\\])"
+        """从 Unblock Youku 的 urls.mjs 中提取指定的 URL 列表"""
+        pattern = f"{name}\\s*=.+?(\\[[\\s\\S\\n]+?\\])"
         match = re.search(pattern, self.source, re.DOTALL)
         if not match:
             elogger.error(f"✘ 从 Unblock Youku 提取 {name} 规则失败")
